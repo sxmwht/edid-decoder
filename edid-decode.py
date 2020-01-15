@@ -22,7 +22,7 @@ class Edid:
         self.features_bitmap     = edid_array[24]
 
         # chromaticity co-ordinates [25-34]
-        self.chrom_coords        = edid_array[25:35]
+        self.chroma_coords       = edid_array[25:35]
         # established timing bitmap [35-37]
         self.est_timing_bitmap   = edid_array[35:38]
 
@@ -113,31 +113,48 @@ def parse_features(features):
     feature_list.append('    Continuous timings (GVT or CVT) {}supported'.format('un' if not ((features >> 0) & 0x1) else ''))
     return '\n'.join(feature_list)
 
-def parse_chrom_coords(coords):
-    rg_lsbs             = coords[0]
-    bw_lsbs             = coords[1]
-    r_msb               = coords[2:4]
-    g_msb               = coords[4:6]
-    b_msb               = coords[6:8]
-    w_msb               = coords[8:10]
+class chroma_coords:
+    def __init__(self, chr_coords):
+        coords  = [int(c, base=16) for c in chr_coords]
+        rg_lsbs = coords[0]
+        bw_lsbs = coords[1]
+        r_msb   = coords[2:4]
+        g_msb   = coords[4:6]
+        b_msb   = coords[6:8]
+        w_msb   = coords[8:10]
 
-    rx_lsbs = (rg_lsbs >> 6) & 0x3
-    ry_lsbs = (rg_lsbs >> 4) & 0x3
-    gx_lsbs = (rg_lsbs >> 2) & 0x3
-    gy_lsbs = (rg_lsbs >> 0) & 0x3
-    bx_lsbs = (bw_lsbs >> 6) & 0x3
-    by_lsbs = (bw_lsbs >> 4) & 0x3
-    wx_lsbs = (bw_lsbs >> 2) & 0x3
-    wy_lsbs = (bw_lsbs >> 0) & 0x3
+        rx_lsbs = (rg_lsbs >> 6) & 0x3
+        ry_lsbs = (rg_lsbs >> 4) & 0x3
+        gx_lsbs = (rg_lsbs >> 2) & 0x3
+        gy_lsbs = (rg_lsbs >> 0) & 0x3
+        bx_lsbs = (bw_lsbs >> 6) & 0x3
+        by_lsbs = (bw_lsbs >> 4) & 0x3
+        wx_lsbs = (bw_lsbs >> 2) & 0x3
+        wy_lsbs = (bw_lsbs >> 0) & 0x3
 
-    rx_msbs = r_msb[0]
-    ry_msbs = r_msb[1]
-    gx_msbs = g_msb[0]
-    gy_msbs = g_msb[1]
-    bx_msbs = b_msb[0]
-    by_msbs = b_msb[1]
-    wx_msbs = w_msb[0]
-    wy_msbs = w_msb[1]
+        rx_msbs = r_msb[0]
+        ry_msbs = r_msb[1]
+        gx_msbs = g_msb[0]
+        gy_msbs = g_msb[1]
+        bx_msbs = b_msb[0]
+        by_msbs = b_msb[1]
+        wx_msbs = w_msb[0]
+        wy_msbs = w_msb[1]
+
+        self.rx = ((rx_msbs << 2) + rx_lsbs) / 1024
+        self.ry = ((ry_msbs << 2) + ry_lsbs) / 1024
+        self.gx = ((gx_msbs << 2) + gx_lsbs) / 1024
+        self.gy = ((gy_msbs << 2) + gy_lsbs) / 1024
+        self.bx = ((bx_msbs << 2) + bx_lsbs) / 1024
+        self.by = ((by_msbs << 2) + by_lsbs) / 1024
+        self.wx = ((wx_msbs << 2) + wx_lsbs) / 1024
+        self.wy = ((wy_msbs << 2) + wy_lsbs) / 1024
+
+def parse_chroma_coords(coords):
+    print("    Red  : ({},{})".format(coords.rx, coords.ry))
+    print("    Green: ({},{})".format(coords.gx, coords.gy))
+    print("    Blue : ({},{})".format(coords.bx, coords.by))
+    print("    White: ({},{})".format(coords.wx, coords.wy))
 
 def parse_timings(timings):
     timings0 = int(timings[0], base=16)
@@ -203,6 +220,7 @@ def parse_display_modes(display_modes):
 
 class descriptor:
     def __init__(self, desc_string):
+        self.desc_raw = desc_string
         desc_int = [int(i, base=16) for i in desc_string]
         if not (desc_int[0] == 0 and desc_int[1] == 0):
             self.desctype       = 'dtd'
@@ -237,6 +255,7 @@ def parse_dtd(dtd):
     print("    Vertical image size (mm)   = {}".format(dtd.v_size_mm))
     print("    Horizontal border          = {} ({} total)".format(dtd.h_border, 2*dtd.h_border))
     print("    Vertical border            = {} ({} total)".format(dtd.v_border, 2*dtd.v_border))
+    print("    {}".format(dtd.desc_raw))
 
 
 def parse_edid(edid):
@@ -256,7 +275,9 @@ def parse_edid(edid):
 
     print('\n')
     print("Chromaticity co-ordinates = ")
+    parse_chroma_coords(chroma_coords(edid.chroma_coords))
 
+    print('\n')
     print("Established timing  = {} ({})".format(parse_timings(edid.est_timing_bitmap), format_edid_chunk(edid.est_timing_bitmap)))
 
     print('\n')
@@ -269,13 +290,14 @@ def parse_edid(edid):
     descriptors.append(descriptor(edid.descriptor4))
 
     for i in range(1,5):
-        print('\n')
         if descriptors[i-1].desctype == 'dtd':
+            print('\n')
             print("Detailed Timing Descriptor {}".format(i))
             parse_dtd(descriptors[i-1])
 
+    print('\n')
     print("Num extensions      = {}".format(format_edid_chunk(edid.num_extensions)))
-    print("checksum            = {}".format(format_edid_chunk(edid.checksum)))
+    print("Checksum            = {}".format(format_edid_chunk(edid.checksum)))
 
 ## begin
 
