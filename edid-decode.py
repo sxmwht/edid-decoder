@@ -213,11 +213,6 @@ def parse_display_modes(display_modes):
 
     return '\n'.join(mode_list)
 
-#def parse_dtds(dtds_string):
-#    dtds_int = [int(i, base=16) for i in dtds_string]
-#
-#    pixel_clock =
-
 class descriptor:
     def __init__(self, desc_string):
         self.desc_raw = desc_string
@@ -237,9 +232,101 @@ class descriptor:
             self.v_size_mm  = desc_int[13]+ ((desc_int[14] >> 0) & 0xF)
             self.h_border   = desc_int[15]
             self.v_border   = desc_int[16]
+
+            # TODO implement features of DTDs
             self.features   = desc_int[17]
+            self.interlaced = "{}nterlaced".format("Non-i" if not (self.features >> 8) & 0x1 else "I")
         else:
+            # TODO implement display descriptors
             self.desctype   = "display descriptor"
+            self.type       = desc_int[3]
+            self.offsets    = desc_int[4]
+            self.data       = desc_int[5:18]
+
+def split_word(word):
+    retval = []
+    for i in reversed(range(word.bit_length())):
+        retval.append(word >> i & 0x1)
+    return retval
+
+def parse_disp_desc(descriptor):
+    if descriptor.type == 0xFF: #serial number
+        data = ''.join([chr(c) for c in descriptor.data])
+        print("    Display Serial No. = {}".format(data))
+    elif descriptor.type == 0xFE: # unspecified text
+        data = ''.join([chr(c) for c in descriptor.data])
+        print("    {}".format(data))
+    elif descriptor.type == 0xFC: # display name
+        data = ''.join([chr(c) for c in descriptor.data])
+        print("    Display name = {}".format(data))
+    elif descriptor.type == 0xFD: # display range limits
+        v_min_fr = descriptor.data[0]
+        v_max_fr = descriptor.data[1]
+        h_min_fr = descriptor.data[2]
+        h_max_fr = descriptor.data[3]
+        desc_h_offsets = (descriptor.offsets >> 2 & 0x11)
+        desc_v_offsets = (descriptor.offsets >> 0 & 0x11)
+        if desc_h_offsets & 0x10 == 0x10:
+            h_max_fr += 255
+        if desc_h_offsets & 0x11 == 0x11:
+            h_min_fr += 255
+        if desc_v_offsets & 0x10 == 0x10:
+            v_max_fr += 255
+        if desc_v_offsets & 0x11 == 0x11:
+            v_min_fr += 255
+        print("    Horizontal field rate = {}-{}Hz".format(h_min_fr, h_max_fr))
+        print("    Vertical field rate   = {}-{}Hz".format(v_min_fr, v_max_fr))
+        print("    Maximum pixel clock   = {}MHz".format(10*descriptor.data[4]))
+        if descriptor.data[5] == 0x00:
+            print("    Default GTF")
+        elif descriptor.data[5] == 0x01:
+            print("    No timing information")
+        elif descriptor.data[5] == 0x02:
+            print("    GTF:")
+            print("        Start freq = {}kHz".format(descriptor.data[7]*2))
+            print("        C          = {}".format(descriptor.data[8]/2))
+            print("        M          = {}".format((descriptor.data[9]<<8)+descriptor.data[10]))
+            print("        K          = {}".format(descriptor.data[11]))
+            print("        J          = {}".format(descriptor.data[12]/2))
+        elif descriptor.data[5] == 0x04:
+            print("    CVT:")
+            print("        Version = {}.{}".format(descriptor.data[6] >> 8, descriptor.data[6] & 0xF))
+            print("        Pixel clock = {}".format(10*descriptor.data[4] - 0.25*descriptor.data[12]))
+            asp_rat_bm = split_word(descriptor.data[9])
+            print("        Aspect ratios = ")
+            asp_rat_dict = {
+                    0 : "4:3",
+                    1 : "16:9",
+                    2 : "16:10",
+                    3 : "5:4",
+                    4 : "5:3"
+                    }
+            for i in range(0,5):
+                if asp_rat_bm[i]:
+                    print("            {}".format(asp_rat_dict[i]))
+            byte15 = split_word(descriptor.data[10])
+            pref_asp = (byte15[0] << 2) + (byte15[1] << 1) + byte15[2]
+            print("        Preferred aspect ratio = {}".format(asp_rat_dict[pref_asp]))
+            if byte15[3]:
+                print("        CVT-RB reduced blanking (preferred)")
+            if byte15[4]:
+                print("        CVT Standard blanking")
+
+            scaling_support = split_word(descriptor.data[11])
+            ss_dict = { 
+                        0: "Horizontal shrink",
+                        1: "horizontal stretch",
+                        2: "Vertical shrink",
+                        3: "Vertical stretch"
+                    }
+            print("        Scaling support:")
+            for i in range(0,4):
+                if scaling_support[i]:
+                    print("            {}".format(ss_dict[i]))            
+            
+            print("        Preferred vertical refresh rate = {}".format(descriptor.data[12]))
+    print("    {}".format(descriptor.desc_raw))
+
 
 def parse_dtd(dtd):
     print("    Pixel clock                = {}MHz".format(dtd.pxlclk_MHz))
@@ -255,6 +342,8 @@ def parse_dtd(dtd):
     print("    Vertical image size (mm)   = {}".format(dtd.v_size_mm))
     print("    Horizontal border          = {} ({} total)".format(dtd.h_border, 2*dtd.h_border))
     print("    Vertical border            = {} ({} total)".format(dtd.v_border, 2*dtd.v_border))
+    # TODO implement printing of features explicitly
+    print("    Features bitmap            = 0x{}".format(dtd.features))
     print("    {}".format(dtd.desc_raw))
 
 
@@ -294,6 +383,10 @@ def parse_edid(edid):
             print('\n')
             print("Detailed Timing Descriptor {}".format(i))
             parse_dtd(descriptors[i-1])
+        else:
+            print('\n')
+            print("Display Descriptor {}".format(i))
+            parse_disp_desc(descriptors[i-1])
 
     print('\n')
     print("Num extensions      = {}".format(format_edid_chunk(edid.num_extensions)))
@@ -313,3 +406,5 @@ with open(sys.argv[1], 'r') as edid_file:
     edid_formatted = edid_raw.split()[0:128]
     edid = Edid(edid_formatted)
     parse_edid(edid)
+
+# FIN
